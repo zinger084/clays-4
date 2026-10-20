@@ -104,6 +104,7 @@
   .who strong { font-size: 20px; letter-spacing: -0.02em; }
   .who .run { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 750; font-size: 20px; }
   .who .run.empty { color: #c0b8ac; font-weight: 500; }
+  .who .pct { margin-left: 6px; color: var(--muted); font-size: 14px; font-weight: 650; }
   .nums { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
   .nums button {
     min-width: 0;
@@ -249,6 +250,19 @@ function esc(s) {
 function displayName(i) { return (state.names[i] || "").trim() || ("Shooter " + (i + 1)); }
 function entered(i) { return state.scores[i].filter((v) => v !== null).length; }
 function raw(i) { return state.scores[i].reduce((sum, v) => sum + (v == null ? 0 : v), 0); }
+function hitPercent(hits, birds) {
+  if (!birds) return null;
+  return Math.round((hits / (birds * MAX_HITS)) * 100);
+}
+function scoreLine(hits, birds) {
+  const n = hits + " hit" + (hits === 1 ? "" : "s");
+  const p = hitPercent(hits, birds);
+  return p == null ? n : (n + " · " + p + "%");
+}
+function runHtml(hits, birds) {
+  if (!birds) return "·";
+  return hits + '<span class="pct">' + hitPercent(hits, birds) + "%</span>";
+}
 function cardDone(i) { return entered(i) === STANDS; }
 function allDone() { return state.names.every((_, i) => cardDone(i)); }
 function standStatus(st) {
@@ -281,13 +295,13 @@ function shareText() {
   const finished = Array.from({ length: STANDS }, (_, st) => standStatus(st) === "full").filter(Boolean).length;
   const lines = ["4-man sporting clays", finished + " of 18 stands filled for everyone", ""];
   if (result.final) {
-    lines.push("WIN: " + result.rows.filter((r) => r.win).map((r) => r.name + " " + r.hits).join(", "));
+    lines.push("WIN: " + result.rows.filter((r) => r.win).map((r) => r.name + " " + r.hits + " " + hitPercent(r.hits, r.birds) + "%").join(", "));
   } else {
     lines.push("So far");
   }
   result.rows.forEach((r) => {
     if (!r.birds) return;
-    lines.push(r.name + "  " + r.hits);
+    lines.push(r.name + "  " + r.hits + "  " + hitPercent(r.hits, r.birds) + "%");
   });
   if (!result.final) lines.push("", "Winner waits until all 18 stands are in.");
   return lines.join("\n");
@@ -316,21 +330,21 @@ function renderScore() {
       const on = value === n ? " on" : "";
       return '<button type="button" class="' + on + '" data-act="hit" data-i="' + i + '" data-n="' + n + '" aria-pressed="' + (value === n) + '" aria-label="' + esc(displayName(i)) + " stand " + (stand + 1) + ", " + n + ' hits">' + n + "</button>";
     }).join("");
-    const run = birds ? String(raw(i)) : "·";
+    const run = runHtml(raw(i), birds);
     return '<article class="shooter"><div class="who"><strong>' + esc(displayName(i)) + '</strong><span class="run' + (birds ? "" : " empty") + '">' + run + "</span></div><div class=\"nums\">" + nums + "</div></article>";
   }).join("");
   return '<header class="sticky"><p class="brand">4-man sporting clays</p><div class="standnav">' +
     '<button type="button" class="jump" data-act="prev">Prev</button><div class="standmid"><div class="standnum">' + (stand + 1) +
     '</div><div class="standof">of 18</div></div><button type="button" class="jump" data-act="next">Next</button></div>' +
     '<div class="dots">' + dots + "</div></header>" + cards +
-    '<p class="hint">Tap 0 through 6. Up to 6 hits on a stand. Tap the same number again to clear it. A blank is not a zero. The number on the right is hits so far.</p>';
+    '<p class="hint">Tap 0 through 6. Up to 6 hits on a stand. Tap the same number again to clear it. A blank is not a zero. The number on the right is hits so far, then the percent of those targets.</p>';
 }
 function renderResults() {
   const result = board();
   const people = result.rows.map((r) => {
     const cls = r.win ? "win" : (r.lead ? "lead" : "");
     const pill = r.win ? '<span class="pill win">WIN</span>' : (r.lead ? '<span class="pill lead">LEAD</span>' : "");
-    const score = r.birds ? (r.hits + " hit" + (r.hits === 1 ? "" : "s")) : "no birds yet";
+    const score = r.birds ? scoreLine(r.hits, r.birds) : "no birds yet";
     return '<article class="row ' + cls + '"><div class="topline"><span class="name">' + esc(r.name) + "</span>" + pill +
       '</div><div class="sub">' + score + " · " + r.birds + " of 18 stands</div></article>";
   }).join("");
@@ -430,6 +444,8 @@ function runTests() {
   for (let i = 0; i < N; i++) for (let st = 0; st < STANDS; st++) full.scores[i][st] = i === 0 ? 6 : 4;
   state = full;
   eq("ann hits", raw(0), 108);
+  eq("ann percent", hitPercent(raw(0), entered(0)), 100);
+  eq("bob percent", hitPercent(raw(1), entered(1)), 67);
   eq("winner", board().rows.filter((r) => r.win).map((r) => r.name), ["Ann"]);
   full.scores[1] = full.scores[0].slice();
   eq("tie", board().rows.filter((r) => r.win).map((r) => r.name).sort(), ["Ann", "Bob"]);
@@ -438,10 +454,12 @@ function runTests() {
   mid.scores[1][0] = 3;
   state = mid;
   eq("lead", board().rows.filter((r) => r.lead).map((r) => r.name), ["Shooter 1"]);
+  eq("partial percent", hitPercent(5, 1), 83);
+  eq("miss percent", hitPercent(0, 1), 0);
   eq("not final", board().final, false);
   const text = shareText();
   state = full;
-  eq("share win", shareText().indexOf("WIN: Ann 108") >= 0, true);
+  eq("share win", shareText().indexOf("WIN: Ann 108 100%") >= 0, true);
   eq("mid has no win line", text.indexOf("WIN:") === -1, true);
   document.body.innerHTML = '<pre id="testout">' + (fails.length ? ("FAIL\n" + fails.join("\n")) : "PASS") + "</pre>";
 }
